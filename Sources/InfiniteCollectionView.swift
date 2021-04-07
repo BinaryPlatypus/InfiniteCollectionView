@@ -8,33 +8,17 @@
 
 import UIKit
 
-@objc public protocol InfiniteCollectionViewDataSource: class {
-    @objc @available(*, deprecated, renamed: "number(ofItems:)")
-    optional func numberOfItems(collectionView: UICollectionView) -> Int
-    @objc @available(*, deprecated, renamed: "collectionView(_:dequeueForItemAt:cellForItemAt:)")
-    optional func cellForItemAtIndexPath(collectionView: UICollectionView, dequeueIndexPath: NSIndexPath, indexPath: NSIndexPath) -> UICollectionViewCell
-    func number(ofItems collectionView: UICollectionView) -> Int
-    func collectionView(_ collectionView: UICollectionView, dequeueForItemAt dequeueIndexPath: IndexPath, cellForItemAt usableIndexPath: IndexPath) -> UICollectionViewCell
-}
-
-@objc public protocol InfiniteCollectionViewDelegate: class {
-    @objc @available(*, deprecated, renamed: "infiniteCollectionView(_:didSelectItemAt:)")
-    optional func didSelectCellAtIndexPath(collectionView: UICollectionView, indexPath: NSIndexPath)
-    @objc @available(*, deprecated, renamed: "scrollView(_:pageIndex:)")
-    optional func didUpdatePageIndex(index: Int)
-    @objc optional func infiniteCollectionView(_ collectionView: UICollectionView, didSelectItemAt usableIndexPath: IndexPath)
-    @objc optional func scrollView(_ scrollView: UIScrollView, pageIndex: Int)
-}
-
 open class InfiniteCollectionView: UICollectionView {
+    private var trigger = false
+    private var currentOffsetX: CGFloat = 0
     open weak var infiniteDataSource: InfiniteCollectionViewDataSource?
     open weak var infiniteDelegate: InfiniteCollectionViewDelegate?
-    @available(*, deprecated, message: "It becomes unnecessary because it uses UICollectionViewFlowLayout.")
-    open var cellWidth: CGFloat?
     fileprivate let dummyCount: Int = 3
     fileprivate let defaultIdentifier = "Cell"
     fileprivate var indexOffset: Int = 0
     fileprivate var pageIndex = 0
+    fileprivate var oldIndex = 0
+
     required public init?(coder aDecoder: NSCoder) {
         super.init(coder: aDecoder)
         configure()
@@ -44,12 +28,12 @@ open class InfiniteCollectionView: UICollectionView {
         configure()
     }
     deinit {
-        NotificationCenter.default.removeObserver(self, name: .UIDeviceOrientationDidChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
     }
-    open func rotate(_ notification: Notification) {
+    @objc open func rotate(_ notification: Notification) {
         setContentOffset(CGPoint(x: CGFloat(pageIndex + indexOffset) * itemWidth, y: contentOffset.y), animated: false)
     }
-    open override func selectItem(at indexPath: IndexPath?, animated: Bool, scrollPosition: UICollectionViewScrollPosition) {
+    open override func selectItem(at indexPath: IndexPath?, animated: Bool, scrollPosition: UICollectionView.ScrollPosition) {
         guard let indexPath = indexPath else { return }
         // Correct the input IndexPath
         let correctedIndexPath = IndexPath(row: correctedIndex(indexPath.item + indexOffset), section: 0)
@@ -84,13 +68,13 @@ private extension InfiniteCollectionView {
         delegate = self
         dataSource = self
         register(UICollectionViewCell.self, forCellWithReuseIdentifier: defaultIdentifier)
-        NotificationCenter.default.addObserver(self, selector: #selector(InfiniteCollectionView.rotate(_:)), name: .UIDeviceOrientationDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(InfiniteCollectionView.rotate(_:)), name: UIDevice.orientationDidChangeNotification, object: nil)
     }
     func centerIfNeeded(_ scrollView: UIScrollView) {
         let currentOffset = contentOffset
         let centerX = (scrollView.contentSize.width - bounds.width) / 2
         let distFromCenter = centerX - currentOffset.x
-        if fabs(distFromCenter) > (totalContentWidth / 4) {
+        if abs(distFromCenter) > (totalContentWidth / 4) {
             let cellcount = distFromCenter / itemWidth
             let shiftCells = Int((cellcount > 0) ? floor(cellcount) : ceil(cellcount))
             let offsetCorrection = (abs(cellcount).truncatingRemainder(dividingBy: 1)) * itemWidth
@@ -135,11 +119,34 @@ extension InfiniteCollectionView: UICollectionViewDataSource {
 }
 
 // MARK: - UICollectionViewDelegate
-extension InfiniteCollectionView: UICollectionViewDelegate {
+extension InfiniteCollectionView: UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         infiniteDelegate?.infiniteCollectionView?(collectionView, didSelectItemAt: IndexPath(item: correctedIndex(indexPath.item - indexOffset), section: 0))
     }
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         centerIfNeeded(scrollView)
+        // Since this method is invoked multiple times during a swipe cell animation, changing of active dot is controlled by managing below trigger
+        if trigger == true {
+            // Previous swipe animation has ended
+            // obtain x translation
+            let translationX = scrollView.panGestureRecognizer.translation(in: superview!).x
+            // perform swipe left or right animation only if it is a new cell and translation is non-zero
+            if pageIndex != oldIndex && translationX != 0 {
+                if translationX < 0 {
+                    infiniteDelegate?.rightScroll?()
+                } else {
+                    // if translationX > 0
+                    infiniteDelegate?.leftScroll?()
+                }
+                oldIndex = pageIndex
+                trigger = false
+            }
+        }
+    }
+    public func scrollViewWillBeginDecelerating(_ scrollView: UIScrollView) {
+        trigger = true
+    }
+    public func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        return collectionView.frame.size
     }
 }
