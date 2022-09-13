@@ -7,7 +7,7 @@
 
 import UIKit
 
-@objc public protocol InfiniteCollectionViewDataSource: class {
+@objc public protocol InfiniteCollectionViewDataSource: AnyObject {
     func number(ofItems collectionView: UICollectionView) -> Int
     func collectionView(_ collectionView: UICollectionView, dequeueForItemAt dequeueIndexPath: IndexPath, cellForItemAt usableIndexPath: IndexPath) -> UICollectionViewCell
 }
